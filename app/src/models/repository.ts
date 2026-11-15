@@ -2,6 +2,7 @@ import * as Path from 'path'
 
 import { GitHubRepository, ForkedGitHubRepository } from './github-repository'
 import { IAheadBehind } from './branch'
+import { WorktreeEntry } from './worktree'
 import {
   WorkflowPreferences,
   ForkContributionTarget,
@@ -156,6 +157,30 @@ export interface ILocalRepositoryState {
    * The number of uncommitted changes currently in the repository.
    */
   readonly changedFilesCount: number
+  /**
+   * The name of the currently checked out branch, or `null` when HEAD is
+   * detached (or when the branch couldn't be determined).
+   */
+  readonly currentBranch: string | null
+  /**
+   * The SHA of the tip commit of the current branch, or `null` if unknown.
+   * Used to describe the repository when HEAD is detached.
+   */
+  readonly currentTip: string | null
+  /**
+   * The name of the default remote, or `null` when the repository has no
+   * remotes (i.e. when it hasn't been published yet).
+   */
+  readonly remoteName: string | null
+  /**
+   * Whether the currently checked out branch has an upstream tracking branch.
+   */
+  readonly hasUpstreamBranch: boolean
+  /**
+   * The worktrees belonging to this repository, including the main worktree.
+   * Empty when worktrees haven't been loaded (or couldn't be loaded) yet.
+   */
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
 }
 
 /**

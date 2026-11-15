@@ -1,0 +1,335 @@
+@import '../mixins';
+
+// The panel sits to the left of the toolbar and the repository view and is the
+// full height of the app chrome, so the two of them have to live side by side.
+#desktop-app-body {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#desktop-app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+#scm-panel-resizable {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
+  // Same treatment as #repository-sidebar: no background of its own, just a
+  // divider, so the panel reads as part of the window rather than a slab on
+  // top of it.
+  border-right: 1px solid var(--box-border-color);
+}
+
+#scm-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  // The header stands in for the toolbar over this column, so it matches the
+  // toolbar's height and colors and keeps that band unbroken across the window.
+  .scm-panel-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    height: var(--toolbar-height);
+    padding: 0 var(--spacing-half) 0 var(--spacing);
+    border-bottom: 1px solid var(--toolbar-border-color);
+    color: var(--toolbar-text-color);
+    background-color: var(--toolbar-background-color);
+  }
+
+  .scm-panel-title {
+    @include ellipsis;
+
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: inherit;
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .scm-panel-header-button {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--toolbar-button-secondary-color);
+
+    &:hover:not(:disabled) {
+      color: var(--toolbar-button-color);
+    }
+
+    &:focus:not(:disabled) {
+      color: var(--toolbar-button-color);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+    }
+  }
+
+  // The filter list fills whatever's left below the header.
+  .filter-list {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .new-repository-button {
+    flex-shrink: 0;
+
+    .octicon {
+      margin-left: 5px;
+    }
+  }
+
+  .no-items {
+    padding: var(--spacing);
+    text-align: center;
+    color: var(--text-secondary-color);
+  }
+
+  .filter-list-group-header {
+    @include ellipsis;
+
+    padding: 0 var(--spacing);
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+// Rows follow the repository list's and worktree list's metrics so the two
+// lists look like the same control.
+//
+// The three columns - name, ref, trailing - are sized identically on every row
+// so the refs and the action buttons line up down the panel like a table.
+// Nesting is expressed with padding inside the name column so that indenting a
+// worktree doesn't move the other two columns.
+.scm-row {
+  --scm-name-column: 45%;
+
+  display: grid;
+  grid-template-columns: var(--scm-name-column) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--spacing-half);
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--spacing);
+
+  .row-name {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .row-ref {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .row-trailing {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .twistie,
+  .twistie-spacer {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin-right: var(--spacing-half);
+  }
+
+  .twistie {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary-color);
+
+    &:hover {
+      color: var(--text-color);
+    }
+  }
+
+  .row-icon {
+    flex-shrink: 0;
+    width: 16px;
+    margin-right: var(--spacing-half);
+  }
+
+  .name {
+    @include ellipsis;
+
+    min-width: 0;
+
+    .prefix {
+      color: var(--text-secondary-color);
+    }
+
+    // Used to highlight substring matches in filtered lists
+    mark {
+      font-weight: bold;
+      // Reset browser defaults
+      background-color: inherit;
+      color: currentColor;
+      text-decoration: underline;
+    }
+  }
+
+  // The branch (or detached HEAD) the row is sitting on. Styled like the
+  // worktree list's description so the two agree.
+  .ref {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+    color: var(--text-secondary-color);
+    font-size: var(--font-size-sm);
+
+    .octicon {
+      flex-shrink: 0;
+      width: 12px;
+      margin-right: 2px;
+    }
+
+    .ref-name {
+      @include ellipsis;
+    }
+  }
+
+  // A fixed minimum so that the action buttons of every row start at the same
+  // offset whether or not the row has anything to report.
+  .indicators {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    min-width: 28px;
+    color: var(--text-secondary-color);
+
+    // Deliberately not `.ahead-behind`: that class carries a global toolbar
+    // badge style (dark pill, inherited text color) which makes the arrows
+    // disappear against the panel background.
+    .scm-ahead-behind {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      font-size: var(--font-size-sm);
+
+      .octicon {
+        width: 12px;
+      }
+
+      .count {
+        margin-right: 2px;
+      }
+    }
+
+    .change-indicator {
+      display: flex;
+      align-items: center;
+      margin-left: var(--spacing-half);
+
+      .octicon {
+        width: 12px;
+        color: var(--tab-bar-active-color);
+      }
+    }
+  }
+
+  .worktree-locked {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    .octicon {
+      width: 12px;
+    }
+  }
+
+  // Row actions are always visible, on every row, so the panel can act on any
+  // repository without selecting it first.
+  .actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    padding-left: 2px;
+
+    .action-spacer {
+      flex-shrink: 0;
+      width: 18px;
+      height: 20px;
+    }
+
+    .action {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 20px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary-color);
+
+      &:hover:not(:disabled) {
+        color: var(--text-color);
+      }
+
+      &:disabled {
+        opacity: 0.5;
+      }
+
+      .octicon {
+        width: 14px;
+      }
+    }
+  }
+}
+
+// Worktrees are indented under their repository. The padding lives on the name
+// column so the ref column stays put.
+.scm-worktree-row .row-name {
+  padding-left: var(--spacing);
+}
+
+// Inherit the selected row's foreground so the branch, indicators and actions
+// don't stay grey against the selection fill.
+#scm-panel .list-item.selected .scm-row {
+  .ref,
+  .indicators,
+  .worktree-locked,
+  .twistie,
+  .actions .action {
+    color: inherit;
+  }
+
+  .indicators .change-indicator .octicon {
+    color: inherit;
+  }
+}

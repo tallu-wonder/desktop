@@ -229,8 +229,10 @@ function packageApp() {
           !isDevelopmentBuild
             ? 'x-github-desktop-auth'
             : 'x-github-desktop-dev-auth',
-          'x-github-client',
-          'github-mac',
+          // Only a published build should claim the shared schemes; a local
+          // build would otherwise compete with an installed GitHub Desktop for
+          // "Open in Desktop" links.
+          ...(isPublishableBuild ? ['x-github-client', 'github-mac'] : []),
         ],
       },
     ],

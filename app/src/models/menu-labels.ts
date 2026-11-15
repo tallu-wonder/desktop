@@ -67,4 +67,7 @@ export type MenuLabelsEvent = {
    * says "Show changes filter" or "Hide changes filter".
    */
   readonly isChangesFilterVisible?: boolean
+
+  /** Whether the source control panel is currently shown */
+  readonly isScmPanelVisible?: boolean
 }

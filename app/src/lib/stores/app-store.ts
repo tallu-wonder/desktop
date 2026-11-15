@@ -351,7 +351,10 @@ import {
 } from '../copilot-conflict-resolution-error'
 import { getDefaultDir } from '../../ui/lib/default-dir'
 import { WorkflowPreferences } from '../../models/workflow-preferences'
-import { RepositoryIndicatorUpdater } from './helpers/repository-indicator-updater'
+import {
+  DefaultRepositoryIndicatorInterval,
+  RepositoryIndicatorUpdater,
+} from './helpers/repository-indicator-updater'
 import { isAttributableEmailFor } from '../email'
 import { TrashNameLabel } from '../../ui/lib/context-menu'
 import { GitError as DugiteError } from 'dugite'
@@ -460,6 +463,10 @@ const RecentRepositoriesLength = 3
 const defaultSidebarWidth: number = 250
 const sidebarWidthConfigKey: string = 'sidebar-width'
 
+const defaultScmPanelWidth: number = 360
+const scmPanelWidthConfigKey: string = 'scm-panel-width'
+const scmPanelVisibleConfigKey: string = 'scm-panel-visible'
+
 const defaultCommitSummaryWidth: number = 250
 const commitSummaryWidthConfigKey: string = 'commit-summary-width'
 
@@ -536,9 +543,34 @@ const repositoryIndicatorsEnabledKey = 'enable-repository-indicators'
 const BackgroundFetchMinimumInterval = 30 * 60 * 1000
 
 /**
+ * How long to leave between background fetches of the same repository while
+ * the source control panel is on screen. The panel shows every repository's
+ * ahead/behind at once, so those numbers need to be worth looking at.
+ *
+ * Three minutes to match VS Code's default `git.autofetchPeriod`, which is
+ * what the panel is being compared against. `BackgroundFetcher`'s own five
+ * minute floor applies to the poll interval GitHub hands out for the selected
+ * repository and is a different thing.
+ */
+const ScmPanelBackgroundFetchMinimumInterval = 3 * 60 * 1000
+
+/**
  * Wait 2 minutes before refreshing repository indicators
  */
 const InitialRepositoryIndicatorTimeout = 2 * 60 * 1000
+
+/**
+ * How often to refresh every repository's branch, status and worktrees while
+ * the source control panel is on screen. The panel shows all of it at once, so
+ * the default 15 minute cadence would leave it visibly stale.
+ */
+const ScmPanelRepositoryIndicatorInterval = 60 * 1000
+
+/**
+ * How long a pull or push asked for from the source control panel will wait
+ * for a network operation already running in that repository to finish.
+ */
+const ScmPanelOperationWaitTimeout = 2 * 60 * 1000
 
 const MaxInvalidFoldersToDisplay = 3
 
@@ -633,6 +665,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private appIsFocused: boolean = false
 
   private sidebarWidth = constrain(defaultSidebarWidth)
+  private scmPanelWidth = constrain(defaultScmPanelWidth)
+  private scmPanelVisible: boolean = true
   private commitSummaryWidth = constrain(defaultCommitSummaryWidth)
   private stashedFilesWidth = constrain(defaultStashedFilesWidth)
   private pullRequestFileListWidth = constrain(defaultPullRequestFileListWidth)
@@ -1287,6 +1321,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       focusCommitMessage: this.focusCommitMessage,
       emoji: this.emoji,
       sidebarWidth: this.sidebarWidth,
+      scmPanelWidth: this.scmPanelWidth,
+      scmPanelVisible: this.scmPanelVisible,
       branchDropdownWidth: this.branchDropdownWidth,
       worktreeDropdownWidth: this.worktreeDropdownWidth,
       pushPullButtonWidth: this.pushPullButtonWidth,
@@ -2371,7 +2407,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const now = new Date()
     const timeSinceFetch = now.getTime() - lastFetched.getTime()
     const repoName = nameOf(repository)
-    if (timeSinceFetch < BackgroundFetchMinimumInterval) {
+    const minimumInterval = this.scmPanelVisible
+      ? ScmPanelBackgroundFetchMinimumInterval
+      : BackgroundFetchMinimumInterval
+
+    if (timeSinceFetch < minimumInterval) {
       const timeInSeconds = Math.floor(timeSinceFetch / 1000)
 
       log.debug(
@@ -2445,6 +2485,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.sidebarWidth = constrain(
       getNumber(sidebarWidthConfigKey, defaultSidebarWidth)
     )
+    this.scmPanelWidth = constrain(
+      getNumber(scmPanelWidthConfigKey, defaultScmPanelWidth)
+    )
+    this.scmPanelVisible = getBoolean(scmPanelVisibleConfigKey, true)
+    this.updateRepositoryIndicatorCadence()
     this.commitSummaryWidth = constrain(
       getNumber(commitSummaryWidthConfigKey, defaultCommitSummaryWidth)
     )
@@ -2713,6 +2758,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // Start with all the available width
     let available = window.innerWidth
 
+    // The source control panel sits to the left of everything else, so its
+    // width is off the table before we start allocating the sidebar and the
+    // toolbar buttons.
+    const maxScmPanelWidth = Math.max(available - 400, 150)
+    this.scmPanelWidth = constrain(this.scmPanelWidth, 150, maxScmPanelWidth)
+
+    if (this.scmPanelVisible) {
+      available -= clamp(this.scmPanelWidth)
+    }
+
     // // The tutorial currently has a fixed-width sidebar which we have to account
     // // for so it makes sense to limit the width of the file list in order to
     // // give the tutorial enough space to show its content.
@@ -2931,6 +2986,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       hasCurrentPullRequest: currentPullRequest !== null,
       askForConfirmationWhenStashingAllChanges,
       isChangesFilterVisible: this.showChangesFilter,
+      isScmPanelVisible: this.scmPanelVisible,
     })
   }
 
@@ -4107,6 +4163,18 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     // loadBranches needs the default remote to determine the default branch
     await gitStore.loadRemotes()
+
+    // Keep the source control panel's copy of the default remote in sync. The
+    // repository indicator updater skips the selected repository so without
+    // this its row wouldn't know whether the repository has been published.
+    const sidebarState = this.localRepositoryStateLookup.get(repository.id)
+    if (sidebarState !== undefined) {
+      this.localRepositoryStateLookup.set(repository.id, {
+        ...sidebarState,
+        remoteName: gitStore.defaultRemote?.name ?? null,
+      })
+    }
+
     await gitStore.loadBranches()
 
     const section = state.selectedSection
@@ -4191,6 +4259,58 @@ export class AppStore extends TypedBaseStore<IAppState> {
     lookup.set(repository.id, {
       aheadBehind: status.branchAheadBehind || null,
       changedFilesCount: status.workingDirectory.files.length,
+      currentBranch: status.currentBranch ?? null,
+      currentTip: status.currentTip ?? null,
+      hasUpstreamBranch: status.currentUpstreamBranch !== undefined,
+      // These two are comparatively expensive to load so they're refreshed
+      // separately by `updateSidebarRepositoryDetails`. Hold on to whatever we
+      // loaded last time around so that the row doesn't flicker.
+      remoteName: lookup.get(repository.id)?.remoteName ?? null,
+      worktrees: lookup.get(repository.id)?.worktrees ?? [],
+    })
+  }
+
+  /**
+   * Load the pieces of repository state that the source control panel needs
+   * but that `git status` doesn't give us for free, i.e. the default remote
+   * (which tells us whether the repository has been published) and the list of
+   * worktrees (which the panel nests underneath the repository).
+   *
+   * Only called for repositories which already have a sidebar indicator, so it
+   * never resurrects state for a missing repository.
+   */
+  private async updateSidebarRepositoryDetails(
+    repository: Repository
+  ): Promise<void> {
+    const lookup = this.localRepositoryStateLookup
+    const existing = lookup.get(repository.id)
+
+    if (existing === undefined) {
+      return
+    }
+
+    const gitStore = this.gitStoreCache.get(repository)
+
+    await gitStore.loadRemotes().catch(e => {
+      log.error(`Could not load remotes for '${repository.path}'`, e)
+    })
+
+    const worktrees = enableWorktreeSupport()
+      ? await listWorktrees(repository).catch(e => {
+          log.error(`Could not list worktrees in '${repository.path}'`, e)
+          return existing.worktrees
+        })
+      : []
+
+    // The repository may have been removed while we were loading.
+    if (lookup.get(repository.id) === undefined) {
+      return
+    }
+
+    lookup.set(repository.id, {
+      ...lookup.get(repository.id)!,
+      remoteName: gitStore.defaultRemote?.name ?? null,
+      worktrees,
     })
   }
   /**
@@ -4217,7 +4337,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return
     }
 
-    this.updateSidebarIndicator(repository, status)
+    await this.updateSidebarIndicator(repository, status)
+    this.emitUpdate()
+
+    await this.updateSidebarRepositoryDetails(repository)
     this.emitUpdate()
 
     const lastPush = await inferLastPushForRepository(
@@ -4227,16 +4350,30 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
 
     if (await this.shouldBackgroundFetch(repository, lastPush)) {
-      const aheadBehind = await this.fetchForRepositoryIndicator(repository)
+      await this.fetchForRepositoryIndicator(repository)
+
+      // Recompute from a fresh status rather than from what the fetch handed
+      // back. That return value is `gitStore.aheadBehind` for a *refreshed*
+      // repository instance, whose GitStore may never have loaded a status and
+      // will then answer `null` - erasing the very counts the fetch just made
+      // worth showing. A status also costs a fraction of the fetch we've just
+      // paid for.
+      const fetchedStatus = await gitStore.loadStatus()
 
       const existing = lookup.get(repository.id)
-      lookup.set(repository.id, {
-        aheadBehind: aheadBehind,
-        // We don't need to update changedFilesCount here since it was already
-        // set when calling `updateSidebarIndicator()` with the status object.
-        changedFilesCount: existing?.changedFilesCount ?? 0,
-      })
-      this.emitUpdate()
+
+      // Nothing to update if the repository has been removed from the list
+      // while we were fetching.
+      if (existing !== undefined && fetchedStatus !== null) {
+        lookup.set(repository.id, {
+          // The rest of the fields were already set by
+          // `updateSidebarIndicator()` and `updateSidebarRepositoryDetails()`.
+          ...existing,
+          aheadBehind: fetchedStatus.branchAheadBehind ?? null,
+          changedFilesCount: fetchedStatus.workingDirectory.files.length,
+        })
+        this.emitUpdate()
+      }
     }
   }
 
@@ -4246,6 +4383,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // focus event. No point in having the RepositoryIndicatorUpdater do
     // it as well.
     //
+    // Unless the source control panel is open, in which case the selected
+    // repository is just another row in it and needs the same cadence as the
+    // rest. `shouldBackgroundFetch` still gates on when the repository was
+    // last fetched, so this doesn't fetch it twice.
+    //
     // Repository-list reloads can create a different object for the selected
     // database row, so compare IDs rather than references. Cloning selections
     // aren't local repositories and must not exclude an entry with the same ID.
@@ -4254,7 +4396,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // instance since that's a mutable array. We should always return
     // a copy.
     const selectedRepositoryID =
-      this.selectedRepository instanceof Repository
+      !this.scmPanelVisible && this.selectedRepository instanceof Repository
         ? this.selectedRepository.id
         : null
     return this.repositories.filter(x => x.id !== selectedRepositoryID)
@@ -4295,6 +4437,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.repositoryIndicatorsEnabled = repositoryIndicatorsEnabled
     if (repositoryIndicatorsEnabled) {
       this.repositoryIndicatorUpdater.start()
+      this.updateRepositoryIndicatorCadence()
     } else {
       this.repositoryIndicatorUpdater.stop()
     }
@@ -4396,6 +4539,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
       const worktrees = await listWorktrees(repository)
       this.repositoryStateCache.update(repository, () => ({ worktrees }))
       this.statsStore.recordWorktreeCount(worktrees.length)
+
+      // Keep the source control panel's copy in sync. The repository indicator
+      // updater skips the selected repository, so without this the selected
+      // repository's row would never learn about its worktrees.
+      const existing = this.localRepositoryStateLookup.get(repository.id)
+      if (existing !== undefined) {
+        this.localRepositoryStateLookup.set(repository.id, {
+          ...existing,
+          worktrees,
+        })
+      }
 
       // The presence of linked worktrees determines whether the worktree
       // dropdown is shown, which changes how the toolbar width is allocated.
@@ -5470,6 +5624,52 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
   }
 
+  /**
+   * Get a repository ready for a pull or push asked for from the source
+   * control panel, and return the instance to run it against.
+   *
+   * `performPull` and `performPush` quietly do nothing in two situations that
+   * the toolbar never really meets but a row in the panel meets all the time:
+   *
+   *  - another network operation is under way (`withPushPullFetch` drops the
+   *    request). With the panel open every repository is fetched in the
+   *    background every few minutes, and again whenever the window regains
+   *    focus, which is exactly when a row tends to get clicked.
+   *  - the repository's tip or remote hasn't been loaded, which is the normal
+   *    state of a repository that hasn't been selected yet.
+   *
+   * So load the tip and remote, then wait for the repository to go quiet.
+   */
+  public async _prepareForScmPanelOperation(
+    repository: Repository
+  ): Promise<Repository> {
+    // The list may have been reloaded since the row was rendered, and state is
+    // keyed on the instance's hash, so always work with the current instance.
+    const current = () =>
+      this.repositories.find(r => r.id === repository.id) ?? repository
+
+    const gitStore = this.gitStoreCache.get(current())
+    await gitStore.loadStatus()
+
+    if (gitStore.currentRemote === null) {
+      await gitStore.loadRemotes()
+    }
+
+    // A background fetch is normally done within seconds. Don't wait forever
+    // on one that's stuck; past the deadline the request goes ahead and is
+    // dropped as before.
+    const deadline = Date.now() + ScmPanelOperationWaitTimeout
+
+    while (
+      this.repositoryStateCache.get(current()).isPushPullFetchInProgress &&
+      Date.now() < deadline
+    ) {
+      await new Promise(resolve => window.setTimeout(resolve, 200))
+    }
+
+    return current()
+  }
+
   /** This shouldn't be called directly. See `Dispatcher`. */
   private async performPull(repository: Repository): Promise<void> {
     return this.withPushPullFetch(repository, async () => {
@@ -6027,6 +6227,76 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.emitUpdate()
 
     return Promise.resolve()
+  }
+
+  public _setScmPanelWidth(width: number): Promise<void> {
+    this.scmPanelWidth = { ...this.scmPanelWidth, value: width }
+    setNumber(scmPanelWidthConfigKey, width)
+    this.updateResizableConstraints()
+    this.emitUpdate()
+
+    return Promise.resolve()
+  }
+
+  public _resetScmPanelWidth(): Promise<void> {
+    this.scmPanelWidth = { ...this.scmPanelWidth, value: defaultScmPanelWidth }
+    localStorage.removeItem(scmPanelWidthConfigKey)
+    this.updateResizableConstraints()
+    this.emitUpdate()
+
+    return Promise.resolve()
+  }
+
+  public _setScmPanelVisible(visible: boolean): Promise<void> {
+    if (this.scmPanelVisible !== visible) {
+      this.scmPanelVisible = visible
+      setBoolean(scmPanelVisibleConfigKey, visible)
+
+      // The repository and worktree dropdowns go inert while the panel is up,
+      // so don't leave one of them stranded open behind a disabled button.
+      if (visible) {
+        this._closeFoldout(FoldoutType.Repository)
+        this._closeFoldout(FoldoutType.Worktree)
+      }
+
+      this.updateResizableConstraints()
+      this.updateMenuLabelsForSelectedRepository()
+      this.updateRepositoryIndicatorCadence()
+      this.emitUpdate()
+    }
+
+    return Promise.resolve()
+  }
+
+  /**
+   * Keep the repository indicator updater's cadence in step with the source
+   * control panel. While the panel is up its rows are the only place most
+   * repositories are shown, so they need to be refreshed often and refreshed
+   * right away rather than after the usual couple of minutes of grace.
+   */
+  private updateRepositoryIndicatorCadence() {
+    if (!this.repositoryIndicatorsEnabled) {
+      return
+    }
+
+    if (this.scmPanelVisible) {
+      this.repositoryIndicatorUpdater.setRefreshInterval(
+        ScmPanelRepositoryIndicatorInterval
+      )
+      this.repositoryIndicatorUpdater.start()
+      // The panel keeps showing every repository while the window is in the
+      // background, so the updater mustn't stay paused behind it.
+      this.repositoryIndicatorUpdater.resume()
+      this.repositoryIndicatorUpdater.refreshNow()
+    } else {
+      this.repositoryIndicatorUpdater.setRefreshInterval(
+        DefaultRepositoryIndicatorInterval
+      )
+
+      if (!this.appIsFocused) {
+        this.repositoryIndicatorUpdater.pause()
+      }
+    }
   }
 
   public _resetSidebarWidth(): Promise<void> {
@@ -8041,6 +8311,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     if (this.appIsFocused) {
       this.repositoryIndicatorUpdater.resume()
+
+      if (this.scmPanelVisible) {
+        this.repositoryIndicatorUpdater.refreshNow()
+      }
+
       if (this.selectedRepository instanceof Repository) {
         this.startPullRequestUpdater(this.selectedRepository)
         // if we're in the tutorial and we don't have an editor yet, check for one!
@@ -8049,7 +8324,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
         }
       }
     } else {
-      this.repositoryIndicatorUpdater.pause()
+      // Upstream pauses the updater whenever the window loses focus, to keep
+      // background git work out of the way. That can't apply while the source
+      // control panel is up: its rows are what the freshness is for, and they
+      // were showing data from whenever the window last had focus.
+      if (!this.scmPanelVisible) {
+        this.repositoryIndicatorUpdater.pause()
+      }
+
       this.stopPullRequestUpdater()
     }
   }

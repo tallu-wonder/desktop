@@ -81,6 +81,7 @@ describe('AppStore repository indicators', () => {
   })
 
   it('excludes the selected repository when its instance has changed', () => {
+    appStore['scmPanelVisible'] = false
     const repository = new Repository('/repositories/selected', 1, null, false)
     const updatedRepository = new Repository(
       repository.path,
@@ -107,6 +108,7 @@ describe('AppStore repository indicators', () => {
   })
 
   it('excludes the selected repository when its instance is unchanged', () => {
+    appStore['scmPanelVisible'] = false
     const repository = new Repository('/repositories/selected', 1, null, false)
     appStore['repositories'] = [repository]
     appStore['selectedRepository'] = repository
@@ -117,7 +119,28 @@ describe('AppStore repository indicators', () => {
     )
   })
 
+  it('includes the selected repository while the source control panel is open', () => {
+    // With the panel up the selected repository is just another row in it, so
+    // it needs the same refresh and background-fetch cadence as the rest.
+    appStore['scmPanelVisible'] = true
+    const repository = new Repository('/repositories/selected', 1, null, false)
+    const otherRepository = new Repository(
+      '/repositories/other',
+      2,
+      null,
+      false
+    )
+    appStore['repositories'] = [repository, otherRepository]
+    appStore['selectedRepository'] = repository
+
+    assert.deepStrictEqual(
+      appStore['repositoryIndicatorUpdater']['getRepositories'](),
+      [repository, otherRepository]
+    )
+  })
+
   it('returns a copy of all repositories when none is selected', () => {
+    appStore['scmPanelVisible'] = false
     const repositories = [
       new Repository('/repositories/first', 1, null, false),
       new Repository('/repositories/second', 2, null, false),
@@ -132,6 +155,7 @@ describe('AppStore repository indicators', () => {
   })
 
   it('keeps local repositories when a cloning repository is selected', () => {
+    appStore['scmPanelVisible'] = false
     const selectedRepository = new CloningRepository(
       '/repositories/cloning',
       'https://github.com/desktop/cloning.git'

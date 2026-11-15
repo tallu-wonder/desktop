@@ -51,6 +51,7 @@ export function buildDefaultMenuTemplate({
   isStashedChangesVisible = false,
   askForConfirmationWhenStashingAllChanges = true,
   isChangesFilterVisible = true,
+  isScmPanelVisible = true,
 }: MenuLabelsEvent): Electron.MenuItemConstructorOptions[] {
   contributionTargetDefaultBranch = truncateWithEllipsis(
     contributionTargetDefaultBranch,
@@ -196,6 +197,15 @@ export function buildDefaultMenuTemplate({
         id: 'show-repository-list',
         accelerator: 'CmdOrCtrl+T',
         click: emit('choose-repository'),
+      },
+      {
+        label: __DARWIN__
+          ? `${isScmPanelVisible ? 'Hide' : 'Show'} Source Control Panel`
+          : `${isScmPanelVisible ? 'Hide' : 'Show'} &source control panel`,
+        id: 'toggle-scm-panel',
+        // Not Shift+E: that's "Rebase current branch" in the Branch menu.
+        accelerator: 'CmdOrCtrl+Shift+L',
+        click: emit('toggle-scm-panel'),
       },
       {
         label: __DARWIN__ ? 'Show Branches List' : '&Branches list',

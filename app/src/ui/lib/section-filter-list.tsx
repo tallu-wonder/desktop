@@ -187,6 +187,13 @@ interface ISectionFilterListProps<T extends IFilterListItem, GroupIdentifier> {
     item: T,
     event: React.MouseEvent<HTMLDivElement>
   ) => void
+
+  /**
+   * Called when a key is pressed while a row is focused, before the list gets
+   * a chance to act on it. Calling `event.preventDefault()` stops the list
+   * from handling the key itself.
+   */
+  readonly onItemKeyDown?: (item: T, event: React.KeyboardEvent<any>) => void
 }
 
 interface IFilterListState<T extends IFilterListItem, GroupIdentifier> {
@@ -563,6 +570,18 @@ export class SectionFilterList<
     const list = this.list
     if (!list) {
       return
+    }
+
+    if (this.props.onItemKeyDown) {
+      const row = this.state.rows[indexPath.section]?.[indexPath.row]
+
+      if (row?.kind === 'item') {
+        this.props.onItemKeyDown(row.item, event)
+
+        if (event.defaultPrevented) {
+          return
+        }
+      }
     }
 
     const rowCount = this.state.rows.map(r => r.length)
