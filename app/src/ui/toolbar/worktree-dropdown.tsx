@@ -21,6 +21,13 @@ interface IWorktreeDropdownProps {
   readonly onDropDownStateChanged: (state: DropdownState) => void
   readonly enableFocusTrap: boolean
   readonly worktreeDropdownWidth: IConstrainedValue
+
+  /**
+   * Whether the button is inert and only reports the current worktree. Set
+   * while the source control panel is open, since the panel lists every
+   * repository's worktrees already.
+   */
+  readonly disabled?: boolean
 }
 
 interface IWorktreeDropdownState {
@@ -158,7 +165,14 @@ export class WorktreeDropdown extends React.Component<
         icon={octicons.fileDirectory}
         title={title}
         description={description}
-        tooltip={isOpen ? undefined : `Current worktree is ${title}`}
+        tooltip={
+          this.props.disabled
+            ? 'Pick a worktree in the source control panel'
+            : isOpen
+            ? undefined
+            : `Current worktree is ${title}`
+        }
+        disabled={this.props.disabled}
         onDropdownStateChanged={this.props.onDropDownStateChanged}
         onContextMenu={this.onContextMenu}
         dropdownContentRenderer={this.renderWorktreeFoldout}

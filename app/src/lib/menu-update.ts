@@ -443,6 +443,19 @@ function getNoRepositoriesBuilder(state: IAppState): MenuStateBuilder {
     }
   }
 
+  // NOTE: `setEnabled` rather than a one-way `disable` in the branch above.
+  // The ids listed there are re-enabled by `getRepositoryMenuBuilder`, and an
+  // id that isn't would stay disabled forever once the app had started up
+  // without any repositories.
+  menuStateBuilder.setEnabled('toggle-scm-panel', state.repositories.length > 0)
+
+  // The repository and worktree foldouts duplicate the source control panel,
+  // so they're unavailable (like their toolbar buttons) while it's open.
+  if (state.scmPanelVisible) {
+    menuStateBuilder.disable('show-repository-list')
+    menuStateBuilder.disable('show-worktrees-list')
+  }
+
   return menuStateBuilder
 }
 

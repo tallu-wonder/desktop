@@ -3,7 +3,7 @@ import { Repository } from '../../../models/repository'
 /**
  * Refresh repository indicators every 15 minutes.
  */
-const RefreshInterval = 15 * 60 * 1000
+export const DefaultRepositoryIndicatorInterval = 15 * 60 * 1000
 
 /**
  * An upper bound to the skew that should be applied to the fetch interval to
@@ -23,6 +23,9 @@ export class RepositoryIndicatorUpdater {
   private pausePromise: Promise<void> = Promise.resolve()
   private resolvePausePromise: (() => void) | null = null
   private lastRefreshStartedAt: number | null = null
+  private refreshInterval = DefaultRepositoryIndicatorInterval
+  private refreshing = false
+  private refreshRequested = false
 
   public constructor(
     private readonly getRepositories: () => ReadonlyArray<Repository>,
@@ -40,14 +43,16 @@ export class RepositoryIndicatorUpdater {
     }
   }
 
-  private scheduleRefresh() {
+  private scheduleRefresh(immediate: boolean = false) {
     if (this.running && this.refreshTimeoutId === null) {
       const timeSinceLastRefresh =
         this.lastRefreshStartedAt === null
           ? Infinity
           : Date.now() - this.lastRefreshStartedAt
 
-      const timeout = Math.max(RefreshInterval - timeSinceLastRefresh, 0) + skew
+      const timeout = immediate
+        ? 0
+        : Math.max(this.refreshInterval - timeSinceLastRefresh, 0) + skew
       const lastRefreshText = isFinite(timeSinceLastRefresh)
         ? `${(timeSinceLastRefresh / 1000).toFixed(3)}s ago`
         : 'never'
@@ -68,6 +73,35 @@ export class RepositoryIndicatorUpdater {
     // We're only ever called by the setTimeout so it's safe for us to clear
     // this without calling clearTimeout
     this.refreshTimeoutId = null
+
+    // `refreshNow` can fire while a pass is still working through the list
+    // (and a paused pass can sit there for a long time). Starting a second one
+    // would just run every repository twice over.
+    if (this.refreshing) {
+      log.debug(
+        '[RepositoryIndicatorUpdater] Refresh already in progress, queueing'
+      )
+      this.refreshRequested = true
+      return
+    }
+
+    this.refreshing = true
+
+    try {
+      await this.refreshAllRepositoriesOnce()
+    } finally {
+      this.refreshing = false
+    }
+
+    if (this.refreshRequested) {
+      this.refreshRequested = false
+      this.scheduleRefresh(true)
+    } else {
+      this.scheduleRefresh()
+    }
+  }
+
+  private async refreshAllRepositoriesOnce() {
     log.debug('[RepositoryIndicatorUpdater] Running refreshAllRepositories')
     if (this.paused) {
       log.debug(
@@ -119,8 +153,47 @@ export class RepositoryIndicatorUpdater {
         `[RepositoryIndicatorUpdater]: Refreshing sidebar indicators for ${done.size} repositories took ${activeTimeSeconds}s of which ${pausedTimeSeconds}s paused, total ${totalTimeSeconds}s`
       )
     }
+  }
 
-    this.scheduleRefresh()
+  /**
+   * How often to refresh every repository's indicators. The default is
+   * deliberately slow because the indicators are normally only visible in a
+   * dropdown; a consumer that shows them all the time (the source control
+   * panel) asks for something shorter.
+   *
+   * Any pending refresh is rescheduled against the new interval.
+   */
+  public setRefreshInterval(refreshInterval: number) {
+    if (this.refreshInterval === refreshInterval) {
+      return
+    }
+
+    log.debug(
+      `[RepositoryIndicatorUpdater] Refresh interval is now ${
+        refreshInterval / 1000
+      }s`
+    )
+    this.refreshInterval = refreshInterval
+
+    if (this.running) {
+      this.clearRefreshTimeout()
+      this.scheduleRefresh()
+    }
+  }
+
+  /** Refresh every repository now, without waiting for the next interval. */
+  public refreshNow() {
+    if (!this.running) {
+      return
+    }
+
+    if (this.refreshing) {
+      this.refreshRequested = true
+      return
+    }
+
+    this.clearRefreshTimeout()
+    this.scheduleRefresh(true)
   }
 
   private clearRefreshTimeout() {

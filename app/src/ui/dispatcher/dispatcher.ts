@@ -1003,6 +1003,31 @@ export class Dispatcher {
     return this.appStore._resetBranchDropdownWidth()
   }
 
+  /** Set the width of the source control panel to the given value. */
+  public setScmPanelWidth(width: number): Promise<void> {
+    return this.appStore._setScmPanelWidth(width)
+  }
+
+  /** Reset the width of the source control panel to its default value. */
+  public resetScmPanelWidth(): Promise<void> {
+    return this.appStore._resetScmPanelWidth()
+  }
+
+  /**
+   * Get a repository ready for a pull or push asked for from the source
+   * control panel. Resolves with the instance to run the operation against.
+   */
+  public prepareForScmPanelOperation(
+    repository: Repository
+  ): Promise<Repository> {
+    return this.appStore._prepareForScmPanelOperation(repository)
+  }
+
+  /** Show or hide the source control panel. */
+  public setScmPanelVisible(visible: boolean): Promise<void> {
+    return this.appStore._setScmPanelVisible(visible)
+  }
+
   public setWorktreeDropdownWidth(width: number): Promise<void> {
     return this.appStore._setWorktreeDropdownWidth(width)
   }

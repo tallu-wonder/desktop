@@ -44,6 +44,8 @@ import { CloningRepository } from '../models/cloning-repository'
 import { TitleBar, ZoomInfo, FullScreenInfo } from './window'
 
 import { RepositoriesList } from './repositories-list'
+import { ScmPanel } from './scm-panel'
+import { Resizable } from './resizable'
 import { RepositoryView } from './repository'
 import { RenameBranch } from './rename-branch'
 import { DeleteBranch, DeleteRemoteBranch } from './delete-branch'
@@ -556,6 +558,8 @@ export class App extends React.Component<IAppProps, IAppState> {
         return this.resizeActiveResizable('decrease-active-resizable-width')
       case 'toggle-changes-filter':
         return this.toggleChangesFilterVisibility()
+      case 'toggle-scm-panel':
+        return this.onToggleScmPanel()
       default:
         if (isTestMenuEvent(name)) {
           return showTestUI(
@@ -936,6 +940,11 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private chooseRepository() {
+    // See renderRepositoryToolbarButton: the panel owns repository selection.
+    if (this.state.scmPanelVisible) {
+      return
+    }
+
     if (
       this.state.currentFoldout &&
       this.state.currentFoldout.type === FoldoutType.Repository
@@ -966,6 +975,11 @@ export class App extends React.Component<IAppProps, IAppState> {
 
   private showWorktrees() {
     if (!enableWorktreeSupport()) {
+      return
+    }
+
+    // See renderWorktreeToolbarButton: the panel owns worktree selection.
+    if (this.state.scmPanelVisible) {
       return
     }
 
@@ -3335,14 +3349,77 @@ export class App extends React.Component<IAppProps, IAppState> {
         id="desktop-app-contents"
         className={this.getDesktopAppContentsClassNames()}
       >
-        {this.renderToolbar()}
-        {this.renderBanner()}
-        {this.renderRepository()}
+        <div id="desktop-app-body">
+          {this.renderScmPanel()}
+          <div id="desktop-app-main">
+            {this.renderToolbar()}
+            {this.renderBanner()}
+            {this.renderRepository()}
+          </div>
+        </div>
         {this.renderPopups()}
         {this.renderDragElement()}
       </div>
     )
   }
+
+  /**
+   * The persistent source control panel. Shown by default and toggled from
+   * the View menu; it's suppressed in the no-repositories blank slate
+   * since there'd be nothing to list.
+   */
+  private renderScmPanel() {
+    if (!this.state.scmPanelVisible || this.inNoRepositoriesViewState()) {
+      return null
+    }
+
+    const { scmPanelWidth } = this.state
+    const { useCustomShell, selectedShell } = this.state
+
+    return (
+      <Resizable
+        id="scm-panel-resizable"
+        width={scmPanelWidth.value}
+        maximumWidth={scmPanelWidth.max}
+        minimumWidth={scmPanelWidth.min}
+        onResize={this.onScmPanelResize}
+        onReset={this.onScmPanelWidthReset}
+        description="Source control panel"
+      >
+        <ScmPanel
+          dispatcher={this.props.dispatcher}
+          repositories={this.state.repositories}
+          selectedRepository={this.getSelectedRepositoryish()}
+          localRepositoryStateLookup={this.state.localRepositoryStateLookup}
+          askForConfirmationOnRemoveRepository={
+            this.state.askForConfirmationOnRepositoryRemoval
+          }
+          onRemoveRepository={this.removeRepository}
+          onShowRepository={this.showRepository}
+          onViewOnGitHub={this.viewOnGitHub}
+          onOpenInShell={this.openInShell}
+          onOpenInExternalEditor={this.openInExternalEditor}
+          externalEditorLabel={this.externalEditorLabel}
+          shellLabel={useCustomShell ? undefined : selectedShell}
+          onHidePanel={this.onHideScmPanel}
+        />
+      </Resizable>
+    )
+  }
+
+  private getSelectedRepositoryish = () =>
+    this.state.selectedState ? this.state.selectedState.repository : null
+
+  private onScmPanelResize = (width: number) =>
+    this.props.dispatcher.setScmPanelWidth(width)
+
+  private onScmPanelWidthReset = () =>
+    this.props.dispatcher.resetScmPanelWidth()
+
+  private onHideScmPanel = () => this.props.dispatcher.setScmPanelVisible(false)
+
+  private onToggleScmPanel = () =>
+    this.props.dispatcher.setScmPanelVisible(!this.state.scmPanelVisible)
 
   private renderRepositoryList = (): JSX.Element => {
     const selectedRepository = this.state.selectedState
@@ -3513,12 +3590,20 @@ export class App extends React.Component<IAppProps, IAppState> {
      * are open */
     const enableFocusTrap = this.state.currentPopup === null
 
+    // The source control panel is a strictly better version of this dropdown,
+    // so while it's open the dropdown is inert and just reports which
+    // repository is current.
+    const disabled = this.state.scmPanelVisible
+
     return (
       <ToolbarDropdown
         icon={icon}
         title={title}
         description={__DARWIN__ ? 'Current Repository' : 'Current repository'}
-        tooltip={tooltip}
+        tooltip={
+          disabled ? 'Pick a repository in the source control panel' : tooltip
+        }
+        disabled={disabled}
         foldoutStyle={foldoutStyle}
         onContextMenu={this.onRepositoryToolbarButtonContextMenu}
         onDropdownStateChanged={this.onRepositoryDropdownStateChanged}
@@ -3824,6 +3909,7 @@ export class App extends React.Component<IAppProps, IAppState> {
         onDropDownStateChanged={this.onWorktreeDropdownStateChanged}
         enableFocusTrap={enableFocusTrap}
         worktreeDropdownWidth={this.state.worktreeDropdownWidth}
+        disabled={this.state.scmPanelVisible}
       />
     )
   }

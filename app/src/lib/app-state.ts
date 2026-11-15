@@ -212,6 +212,12 @@ export interface IAppState {
   /** The width of the resizable worktree drop down button in the toolbar. */
   readonly worktreeDropdownWidth: IConstrainedValue
 
+  /** The width of the resizable source control panel. */
+  readonly scmPanelWidth: IConstrainedValue
+
+  /** Whether the source control panel is shown alongside the repository. */
+  readonly scmPanelVisible: boolean
+
   /** The width of the resizable push/pull button in the toolbar. */
   readonly pushPullButtonWidth: IConstrainedValue
 
