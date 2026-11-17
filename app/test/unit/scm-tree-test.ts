@@ -24,10 +24,14 @@ const worktree = (
 
 const stateFor = (
   worktrees: ReadonlyArray<WorktreeEntry>,
-  currentBranch: string | null = 'main'
+  currentBranch: string | null = 'main',
+  aheadBehind: ILocalRepositoryState['aheadBehind'] = null,
+  changedFilesCount = 0,
+  worktreeStatus: ILocalRepositoryState['worktreeStatus'] = new Map()
 ): ILocalRepositoryState => ({
-  aheadBehind: null,
-  changedFilesCount: 0,
+  worktreeStatus,
+  aheadBehind,
+  changedFilesCount,
   currentBranch,
   currentTip: '0123456789abcdef0123456789abcdef01234567',
   remoteName: 'origin',
@@ -123,6 +127,90 @@ describe('source control panel tree', () => {
     assert.ok(first.kind === 'worktree' && second.kind === 'worktree')
     assert.equal(first.isCurrentWorktree, true)
     assert.equal(second.isCurrentWorktree, false)
+  })
+
+  it('reports every worktree its own status, wherever the repository is', () => {
+    const mainCounts = { ahead: 1, behind: 2 }
+    const linkedCounts = { ahead: 11, behind: 8 }
+    const otherCounts = { ahead: 0, behind: 5 }
+    const worktrees = [main, linked, otherLinked]
+
+    const expectRows = (items: ReadonlyArray<ScmListItem>) => {
+      const [parent, first, second] = items
+      assert.ok(parent.kind === 'repository')
+      assert.deepStrictEqual(parent.aheadBehind, mainCounts)
+      assert.equal(parent.changedFilesCount, 1)
+      assert.deepStrictEqual(first.aheadBehind, linkedCounts)
+      assert.equal(first.changedFilesCount, 3)
+      assert.deepStrictEqual(second.aheadBehind, otherCounts)
+      assert.equal(second.changedFilesCount, 0)
+    }
+
+    // On the main worktree: the repository's status is the main worktree's
+    // and the linked ones come from the per-worktree statuses.
+    expectRows(
+      rows(
+        [repo('/repos/alpha', 1)],
+        new Map([
+          [
+            1,
+            stateFor(
+              worktrees,
+              'main',
+              mainCounts,
+              1,
+              new Map([
+                [
+                  linked.path,
+                  { aheadBehind: linkedCounts, changedFilesCount: 3 },
+                ],
+                [
+                  otherLinked.path,
+                  { aheadBehind: otherCounts, changedFilesCount: 0 },
+                ],
+              ])
+            ),
+          ],
+        ])
+      )
+    )
+
+    // Switched onto a linked worktree: the repository's status is now that
+    // worktree's, and the main worktree's is one of the separate ones.
+    expectRows(
+      rows(
+        [repo(linked.path, 1, main.path)],
+        new Map([
+          [
+            1,
+            stateFor(
+              worktrees,
+              'feature',
+              linkedCounts,
+              3,
+              new Map([
+                [main.path, { aheadBehind: mainCounts, changedFilesCount: 1 }],
+                [
+                  otherLinked.path,
+                  { aheadBehind: otherCounts, changedFilesCount: 0 },
+                ],
+              ])
+            ),
+          ],
+        ])
+      )
+    )
+  })
+
+  it('shows nothing for a worktree whose status has not loaded', () => {
+    const [, child] = rows(
+      [repo('/repos/alpha', 1)],
+      new Map([[1, stateFor([main, linked], 'main', { ahead: 1, behind: 0 })]])
+    )
+
+    assert.ok(child.kind === 'worktree')
+    assert.equal(child.aheadBehind, null)
+    assert.equal(child.changedFilesCount, 0)
   })
 
   it('marks no worktree as current while on the main worktree', () => {

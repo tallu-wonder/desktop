@@ -228,6 +228,7 @@ import {
   getRepositoryType,
   RepositoryType,
   listWorktrees,
+  getWorktreeStatusSummary,
   resolveMainWorktreePath,
   removeWorktree,
   moveWorktree,
@@ -440,7 +441,7 @@ import {
   findPullRequestsByNumbers,
 } from '../pull-request-refs'
 import { resolveWithin } from '../path'
-import { WorktreeEntry } from '../../models/worktree'
+import { IWorktreeStatusSummary, WorktreeEntry } from '../../models/worktree'
 import { shouldShowWorktreeDropdown } from '../worktree-dropdown'
 import type { Model } from '@github/copilot-sdk/dist/generated/rpc'
 
@@ -4267,6 +4268,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // loaded last time around so that the row doesn't flicker.
       remoteName: lookup.get(repository.id)?.remoteName ?? null,
       worktrees: lookup.get(repository.id)?.worktrees ?? [],
+      worktreeStatus: lookup.get(repository.id)?.worktreeStatus ?? new Map(),
     })
   }
 
@@ -4302,6 +4304,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
         })
       : []
 
+    const worktreeStatus = await this.loadOtherWorktreeStatus(
+      repository,
+      worktrees,
+      existing.worktreeStatus
+    )
+
     // The repository may have been removed while we were loading.
     if (lookup.get(repository.id) === undefined) {
       return
@@ -4311,8 +4319,48 @@ export class AppStore extends TypedBaseStore<IAppState> {
       ...lookup.get(repository.id)!,
       remoteName: gitStore.defaultRemote?.name ?? null,
       worktrees,
+      worktreeStatus,
     })
   }
+  /**
+   * Ahead/behind and uncommitted changes for each of a repository's worktrees
+   * other than the one it's currently on (that one is covered by the status
+   * we load for the repository itself), so the source control panel can show
+   * them next to every worktree rather than only the open one.
+   *
+   * That's one `git status` per extra worktree, so a repository without
+   * linked worktrees costs nothing. A worktree whose status can't be read
+   * keeps what it had.
+   */
+  private async loadOtherWorktreeStatus(
+    repository: Repository,
+    worktrees: ReadonlyArray<WorktreeEntry>,
+    previous: ReadonlyMap<string, IWorktreeStatusSummary>
+  ): Promise<ReadonlyMap<string, IWorktreeStatusSummary>> {
+    const result = new Map<string, IWorktreeStatusSummary>()
+    const normalizePath = (path: string) => path.replace(/[\\/]+$/, '')
+    const currentPath = normalizePath(repository.path)
+
+    for (const worktree of worktrees) {
+      if (worktree.isPrunable || normalizePath(worktree.path) === currentPath) {
+        continue
+      }
+
+      const summary = await getWorktreeStatusSummary(worktree.path).catch(e => {
+        log.error(`Could not load status of worktree '${worktree.path}'`, e)
+        return null
+      })
+
+      const status = summary ?? previous.get(worktree.path)
+
+      if (status !== undefined) {
+        result.set(worktree.path, status)
+      }
+    }
+
+    return result
+  }
+
   /**
    * Refresh indicator in repository list for a specific repository
    */
@@ -6380,6 +6428,23 @@ export class AppStore extends TypedBaseStore<IAppState> {
       repository,
       worktree
     )
+
+    // The status the source control panel holds for this repository describes
+    // the worktree we're leaving. File it under that worktree so its row keeps
+    // its ahead/behind until the next indicator pass reloads everything.
+    const sidebarState = this.localRepositoryStateLookup.get(repository.id)
+    if (sidebarState !== undefined && repository.path !== worktree.path) {
+      this.localRepositoryStateLookup.set(repository.id, {
+        ...sidebarState,
+        worktreeStatus: new Map(sidebarState.worktreeStatus).set(
+          repository.path,
+          {
+            aheadBehind: sidebarState.aheadBehind,
+            changedFilesCount: sidebarState.changedFilesCount,
+          }
+        ),
+      })
+    }
 
     await this._selectRepository(result.repository)
 
