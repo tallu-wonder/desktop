@@ -132,17 +132,16 @@ export class ScmRow extends React.Component<IScmRowProps> {
           )}
         </div>
         <div className="row-trailing">
-          <div className="indicators">
-            {item.worktree.isLocked && (
-              <TooltippedContent
-                className="worktree-locked"
-                tagName="div"
-                tooltip="This worktree is locked"
-              >
-                <Octicon symbol={octicons.lock} />
-              </TooltippedContent>
-            )}
-          </div>
+          {item.worktree.isLocked && (
+            <TooltippedContent
+              className="worktree-locked"
+              tagName="div"
+              tooltip="This worktree is locked"
+            >
+              <Octicon symbol={octicons.lock} />
+            </TooltippedContent>
+          )}
+          {this.renderIndicators(item)}
           {this.renderActions(item)}
         </div>
       </div>
@@ -198,7 +197,12 @@ export class ScmRow extends React.Component<IScmRowProps> {
     )
   }
 
-  private renderIndicators(item: IScmRepositoryItem) {
+  /**
+   * Ahead/behind and the uncommitted-changes dot. On a repository row these
+   * describe the main worktree; on a worktree row, that worktree (and only
+   * the current one has anything to report).
+   */
+  private renderIndicators(item: ScmListItem) {
     const { aheadBehind, changedFilesCount } = item
     const ahead = aheadBehind?.ahead ?? 0
     const behind = aheadBehind?.behind ?? 0

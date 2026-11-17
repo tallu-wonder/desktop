@@ -2,7 +2,7 @@ import * as Path from 'path'
 
 import { GitHubRepository, ForkedGitHubRepository } from './github-repository'
 import { IAheadBehind } from './branch'
-import { WorktreeEntry } from './worktree'
+import { IWorktreeStatusSummary, WorktreeEntry } from './worktree'
 import {
   WorkflowPreferences,
   ForkContributionTarget,
@@ -181,6 +181,12 @@ export interface ILocalRepositoryState {
    * Empty when worktrees haven't been loaded (or couldn't be loaded) yet.
    */
   readonly worktrees: ReadonlyArray<WorktreeEntry>
+  /**
+   * Ahead/behind and uncommitted changes of the worktrees other than the one
+   * the repository is currently on, keyed by worktree path. The current one
+   * isn't in here: `aheadBehind` and `changedFilesCount` above describe it.
+   */
+  readonly worktreeStatus: ReadonlyMap<string, IWorktreeStatusSummary>
 }
 
 /**

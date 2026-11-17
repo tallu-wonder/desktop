@@ -1,7 +1,16 @@
 import * as Path from 'path'
 import type { Repository } from '../../models/repository'
-import type { WorktreeEntry, WorktreeType } from '../../models/worktree'
+import type {
+  IWorktreeStatusSummary,
+  WorktreeEntry,
+  WorktreeType,
+} from '../../models/worktree'
 import { pathExists } from '../path-exists'
+import {
+  isStatusEntry,
+  isStatusHeader,
+  parsePorcelainStatus,
+} from '../status-parser'
 import { git } from './core'
 
 export function parseWorktreePorcelainOutput(
@@ -166,4 +175,57 @@ export async function moveWorktree(
     repository.path,
     'moveWorktree'
   )
+}
+
+/**
+ * A slimmed down `git status` for a worktree that isn't the one the app has
+ * open: just the ahead/behind of its branch and a count of its uncommitted
+ * changes, which is all the source control panel shows for it.
+ *
+ * Returns `null` when the path isn't a working directory git can read.
+ */
+export async function getWorktreeStatusSummary(
+  path: string
+): Promise<IWorktreeStatusSummary | null> {
+  const { stdout, exitCode } = await git(
+    [
+      '--no-optional-locks',
+      'status',
+      '--untracked-files=all',
+      '--branch',
+      '--porcelain=2',
+      '-z',
+    ],
+    path,
+    'getWorktreeStatusSummary',
+    { successExitCodes: new Set([0, 128]), encoding: 'buffer' }
+  )
+
+  if (exitCode === 128) {
+    return null
+  }
+
+  return parseWorktreeStatusSummary(parsePorcelainStatus(stdout))
+}
+
+/** Exported for testing. */
+export function parseWorktreeStatusSummary(
+  status: ReturnType<typeof parsePorcelainStatus>
+): IWorktreeStatusSummary {
+  let aheadBehind: IWorktreeStatusSummary['aheadBehind'] = null
+
+  for (const header of status.filter(isStatusHeader)) {
+    const match = /^branch\.ab \+(\d+) -(\d+)$/.exec(header.value)
+
+    if (match !== null) {
+      aheadBehind = {
+        ahead: parseInt(match[1], 10),
+        behind: parseInt(match[2], 10),
+      }
+    }
+  }
+
+  const changedPaths = new Set(status.filter(isStatusEntry).map(e => e.path))
+
+  return { aheadBehind, changedFilesCount: changedPaths.size }
 }

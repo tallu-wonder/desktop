@@ -594,3 +594,19 @@ remote and then waits (up to two minutes) for the repository to go quiet.
 
 Tests: `app/test/unit/scm-tree-test.ts` and
 `app/test/unit/repository-indicator-updater-test.ts`.
+
+---
+
+## Twelfth round: every worktree shows its own status
+
+The ahead/behind counts and the uncommitted-changes dot used to exist once per
+repository, from the `git status` of whatever worktree the repository was
+switched onto, and were drawn on the repository row. Each row now reports its
+own: the repository row the main worktree's, each worktree row that
+worktree's, wherever the repository happens to be.
+
+`ILocalRepositoryState.worktreeStatus` holds a summary for every worktree
+other than the current one, loaded by `getWorktreeStatusSummary` (one
+`git status` per extra worktree per indicator pass; nothing for a repository
+without linked worktrees). `_switchWorktree` files the outgoing worktree's
+status under its path so its row doesn't go blank until the next pass.

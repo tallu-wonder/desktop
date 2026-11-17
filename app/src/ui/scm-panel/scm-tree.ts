@@ -1,6 +1,7 @@
 import { Repository, ILocalRepositoryState } from '../../models/repository'
 import { CloningRepository } from '../../models/cloning-repository'
 import {
+  IWorktreeStatusSummary,
   WorktreeEntry,
   getWorktreeDescription,
   getWorktreeDisplayName,
@@ -22,6 +23,11 @@ export interface IScmRepositoryItem extends IFilterListItem {
   readonly id: string
   readonly repository: Repositoryish
   readonly needsDisambiguation: boolean
+
+  /**
+   * Ahead/behind and uncommitted changes of the main worktree, whichever
+   * worktree the repository is currently switched onto.
+   */
   readonly aheadBehind: IAheadBehind | null
   readonly changedFilesCount: number
   /**
@@ -82,6 +88,13 @@ export interface IScmWorktreeItem extends IFilterListItem {
    * one selected in the app.
    */
   readonly isCurrentWorktree: boolean
+
+  /**
+   * Ahead/behind and uncommitted changes of this worktree. `null` and zero
+   * until its status has been loaded.
+   */
+  readonly aheadBehind: IAheadBehind | null
+  readonly changedFilesCount: number
 }
 
 export type ScmListItem = IScmRepositoryItem | IScmWorktreeItem
@@ -138,6 +151,7 @@ const emptyState: ILocalRepositoryState = {
   remoteName: null,
   hasUpstreamBranch: false,
   worktrees: [],
+  worktreeStatus: new Map(),
 }
 
 /**
@@ -250,6 +264,19 @@ function toRows(
     repository,
     state
   )
+
+  // The repository's own status describes whichever worktree it's on; the
+  // other worktrees have theirs loaded separately.
+  const currentStatus: IWorktreeStatusSummary = {
+    aheadBehind: item.aheadBehind,
+    changedFilesCount: item.changedFilesCount,
+  }
+  const statusOf = (worktree: WorktreeEntry): IWorktreeStatusSummary =>
+    state.worktreeStatus.get(worktree.path) ?? {
+      aheadBehind: null,
+      changedFilesCount: 0,
+    }
+
   const isExpanded =
     linkedWorktrees.length > 0 &&
     (isFiltering || isRepositoryExpanded(repository.id))
@@ -260,8 +287,9 @@ function toRows(
     id: item.id,
     repository,
     needsDisambiguation: item.needsDisambiguation,
-    aheadBehind: item.aheadBehind,
-    changedFilesCount: item.changedFilesCount,
+    ...(isOnMainWorktree || mainWorktree === undefined
+      ? currentStatus
+      : statusOf(mainWorktree)),
     ref: describeMainWorktree(mainWorktree, state),
     refIsDetached:
       mainWorktree !== undefined
@@ -279,15 +307,23 @@ function toRows(
     return [repositoryRow]
   }
 
-  const worktreeRows = linkedWorktrees.map<IScmWorktreeItem>(worktree => ({
-    kind: 'worktree',
-    text: [getWorktreeDisplayName(worktree), worktree.branch ?? worktree.head],
-    id: getWorktreeItemId(repository, worktree),
-    parentRepository: repository,
-    worktree,
-    isCurrentWorktree:
-      normalizePath(repository.path) === normalizePath(worktree.path),
-  }))
+  const worktreeRows = linkedWorktrees.map<IScmWorktreeItem>(worktree => {
+    const isCurrentWorktree =
+      normalizePath(repository.path) === normalizePath(worktree.path)
+
+    return {
+      kind: 'worktree',
+      text: [
+        getWorktreeDisplayName(worktree),
+        worktree.branch ?? worktree.head,
+      ],
+      id: getWorktreeItemId(repository, worktree),
+      parentRepository: repository,
+      worktree,
+      isCurrentWorktree,
+      ...(isCurrentWorktree ? currentStatus : statusOf(worktree)),
+    }
+  })
 
   return [repositoryRow, ...worktreeRows]
 }
