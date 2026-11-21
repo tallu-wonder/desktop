@@ -568,6 +568,24 @@ const InitialRepositoryIndicatorTimeout = 2 * 60 * 1000
 const ScmPanelRepositoryIndicatorInterval = 60 * 1000
 
 /**
+ * The same, while the panel is on screen but the app isn't the one being
+ * used. A pass is a burst of git processes for every repository, and at the
+ * focused cadence that never lets the machine settle: macOS reported the app
+ * as "using significant energy" for sitting in the background. The rows still
+ * move on their own, just less often, and catch up the moment the window is
+ * focused again.
+ */
+const ScmPanelBackgroundRepositoryIndicatorInterval = 5 * 60 * 1000
+
+/**
+ * How long the source control panel trusts a repository's remotes before
+ * reading them again. They only tell a row whether the repository has been
+ * published, which hardly ever changes, and reading them is three git
+ * processes per repository.
+ */
+const ScmPanelRemotesRefreshInterval = 10 * 60 * 1000
+
+/**
  * How long a pull or push asked for from the source control panel will wait
  * for a network operation already running in that repository to finish.
  */
@@ -668,6 +686,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private sidebarWidth = constrain(defaultSidebarWidth)
   private scmPanelWidth = constrain(defaultScmPanelWidth)
   private scmPanelVisible: boolean = true
+
+  /** When each repository's remotes were last read for the panel, by id. */
+  private readonly scmPanelRemotesLoadedAt = new Map<number, number>()
   private commitSummaryWidth = constrain(defaultCommitSummaryWidth)
   private stashedFilesWidth = constrain(defaultStashedFilesWidth)
   private pullRequestFileListWidth = constrain(defaultPullRequestFileListWidth)
@@ -865,6 +886,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
         this.repositoryIndicatorUpdater.start()
       }
     }, InitialRepositoryIndicatorTimeout)
+
+    // Nobody can see the panel while the window is minimized, hidden or fully
+    // covered, so there's nothing to keep fresh; see
+    // `updateRepositoryIndicatorCadence`.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () =>
+        this.updateRepositoryIndicatorCadence(
+          document.visibilityState === 'visible'
+        )
+      )
+    }
 
     API.onTokenInvalidated(this.onTokenInvalidated)
 
@@ -2490,7 +2522,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       getNumber(scmPanelWidthConfigKey, defaultScmPanelWidth)
     )
     this.scmPanelVisible = getBoolean(scmPanelVisibleConfigKey, true)
-    this.updateRepositoryIndicatorCadence()
+    this.updateRepositoryIndicatorCadence(true)
     this.commitSummaryWidth = constrain(
       getNumber(commitSummaryWidthConfigKey, defaultCommitSummaryWidth)
     )
@@ -4293,9 +4325,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     const gitStore = this.gitStoreCache.get(repository)
 
-    await gitStore.loadRemotes().catch(e => {
-      log.error(`Could not load remotes for '${repository.path}'`, e)
-    })
+    const remotesLoadedAt = this.scmPanelRemotesLoadedAt.get(repository.id)
+    if (
+      gitStore.defaultRemote === null ||
+      remotesLoadedAt === undefined ||
+      Date.now() - remotesLoadedAt >= ScmPanelRemotesRefreshInterval
+    ) {
+      this.scmPanelRemotesLoadedAt.set(repository.id, Date.now())
+      await gitStore.loadRemotes().catch(e => {
+        log.error(`Could not load remotes for '${repository.path}'`, e)
+      })
+    }
 
     const worktrees = enableWorktreeSupport()
       ? await listWorktrees(repository).catch(e => {
@@ -4485,7 +4525,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.repositoryIndicatorsEnabled = repositoryIndicatorsEnabled
     if (repositoryIndicatorsEnabled) {
       this.repositoryIndicatorUpdater.start()
-      this.updateRepositoryIndicatorCadence()
+      this.updateRepositoryIndicatorCadence(true)
     } else {
       this.repositoryIndicatorUpdater.stop()
     }
@@ -6309,7 +6349,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
       this.updateResizableConstraints()
       this.updateMenuLabelsForSelectedRepository()
-      this.updateRepositoryIndicatorCadence()
+      this.updateRepositoryIndicatorCadence(true)
       this.emitUpdate()
     }
 
@@ -6321,21 +6361,42 @@ export class AppStore extends TypedBaseStore<IAppState> {
    * control panel. While the panel is up its rows are the only place most
    * repositories are shown, so they need to be refreshed often and refreshed
    * right away rather than after the usual couple of minutes of grace.
+   *
+   * How often depends on whether anyone is looking: every minute while the
+   * app is in use, every few minutes while its window is visible behind
+   * another app, and not at all while the window can't be seen.
+   *
+   * @param refreshNow Whether to also start a pass right away, for when the
+   *                   panel has just come (back) into view.
    */
-  private updateRepositoryIndicatorCadence() {
+  private updateRepositoryIndicatorCadence(refreshNow: boolean = false) {
     if (!this.repositoryIndicatorsEnabled) {
       return
     }
 
     if (this.scmPanelVisible) {
+      const isWindowHidden =
+        typeof document !== 'undefined' && document.visibilityState === 'hidden'
+
       this.repositoryIndicatorUpdater.setRefreshInterval(
-        ScmPanelRepositoryIndicatorInterval
+        this.appIsFocused
+          ? ScmPanelRepositoryIndicatorInterval
+          : ScmPanelBackgroundRepositoryIndicatorInterval
       )
       this.repositoryIndicatorUpdater.start()
+
+      if (isWindowHidden) {
+        this.repositoryIndicatorUpdater.pause()
+        return
+      }
+
       // The panel keeps showing every repository while the window is in the
       // background, so the updater mustn't stay paused behind it.
       this.repositoryIndicatorUpdater.resume()
-      this.repositoryIndicatorUpdater.refreshNow()
+
+      if (refreshNow) {
+        this.repositoryIndicatorUpdater.refreshNow()
+      }
     } else {
       this.repositoryIndicatorUpdater.setRefreshInterval(
         DefaultRepositoryIndicatorInterval
@@ -8378,7 +8439,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       this.repositoryIndicatorUpdater.resume()
 
       if (this.scmPanelVisible) {
-        this.repositoryIndicatorUpdater.refreshNow()
+        this.updateRepositoryIndicatorCadence(true)
       }
 
       if (this.selectedRepository instanceof Repository) {
@@ -8392,8 +8453,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // Upstream pauses the updater whenever the window loses focus, to keep
       // background git work out of the way. That can't apply while the source
       // control panel is up: its rows are what the freshness is for, and they
-      // were showing data from whenever the window last had focus.
-      if (!this.scmPanelVisible) {
+      // were showing data from whenever the window last had focus. It drops
+      // to a slower cadence instead.
+      if (this.scmPanelVisible) {
+        this.updateRepositoryIndicatorCadence()
+      } else {
         this.repositoryIndicatorUpdater.pause()
       }
 

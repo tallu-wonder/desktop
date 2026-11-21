@@ -610,3 +610,23 @@ other than the current one, loaded by `getWorktreeStatusSummary` (one
 `git status` per extra worktree per indicator pass; nothing for a repository
 without linked worktrees). `_switchWorktree` files the outgoing worktree's
 status under its path so its row doesn't go blank until the next pass.
+
+## Thirteenth round: power use
+
+macOS listed the app under "Using Significant Energy". With the panel open the
+indicator pass ran every minute around the clock, focused or not: about 530
+passes and 47,000 git processes a day, the per-worktree status being the
+largest share.
+
+- Focused: unchanged, every minute plus an immediate pass on focus.
+- Visible but not focused: every 5 minutes
+  (`ScmPanelBackgroundRepositoryIndicatorInterval`).
+- Window hidden or minimized (`document.visibilityState`): paused, with a pass
+  as soon as it is visible again.
+- Remotes are re-read at most every 10 minutes per repository instead of on
+  every pass.
+- `getWorktreeStatusSummary` uses `--untracked-files=normal`, so an untracked
+  directory counts as one entry instead of being walked file by file.
+
+Measured over two hours in the background after the change: one pass every
+5 minutes 15 seconds, against one every 78 seconds before.
