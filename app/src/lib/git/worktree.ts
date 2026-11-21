@@ -191,7 +191,10 @@ export async function getWorktreeStatusSummary(
     [
       '--no-optional-locks',
       'status',
-      '--untracked-files=all',
+      // `normal` rather than `all`: the caller only wants to know whether
+      // there are changes, and listing every file inside an untracked
+      // directory is what makes a status of a large worktree slow.
+      '--untracked-files=normal',
       '--branch',
       '--porcelain=2',
       '-z',
